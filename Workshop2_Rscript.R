@@ -10,6 +10,8 @@ install.packages("tidyverse")
 library("recount3")
 library("edgeR")
 library("tidyverse")
+BiocManager::install("ComplexHeatmap")
+library("ComplexHeatmap")
 
 #import data set
 load("Workshop1_output(2).Rdata")
@@ -57,9 +59,71 @@ ggplot() +
 #install ggrepel package - this helps to separate the labels from the data points making them easier to read
 install.packages("ggrepel")
 library(ggrepel)
-ggplot() + 
+ ggplot() + 
   geom_point(data=filter(DE, FDR<0.05), aes(x=logFC, y=-log10(PValue))) +
   geom_point(data=filter(DE, FDR>=0.05), aes(x=logFC, y=-log10(PValue)), colour="grey") +
   geom_text_repel(data = slice_head(DE, n=20), aes(x=logFC, y=-log10(PValue), label = gene_name))
 
 ###Clustering analysis and heatmaps
+
+#shorten name of file to cpm
+ cpm <- cpm.filtered.norm
+ head(cpm)
+ 
+ #rename colnames of cpm to their respective celltype and donor
+ sample.meta.data<-sample.meta.data |> 
+  mutate("sample_name"=paste0(Celltype, "_Donor", Donor))
+ colnames(cpm) <- sample.meta.data$sample_name
+ 
+ #set rownames of cpm as gene ID
+ filtered.gene.meta.data<-left_join(data.frame("gene_id"=rownames(cpm)), gene.meta.data)
+ head(filtered.gene.meta.data)
+ rownames(cpm)<-filtered.gene.meta.data$gene_name
+ 
+ #z score scaling on genes
+ z.scaled.genes <- t(cpm) |> 
+   scale() |> 
+   t()
+ 
+ #find euclidian distance between samples
+ sample.scaled_distances <- dist(t(z.scaled.genes), method ="euclidean")
+ 
+# Cluster samples using hierarchecal clustering
+ sample.scaled.hclust <- hclust(sample.scaled_distances, method = "complete")
+plot(sample.scaled.hclust) 
+
+#cluster gene-wise scaled cpm values
+gene_distances<-dist(z.scaled.genes, method="euclidean")
+gene_hclust<- hclust(gene_distances, method = "average")
+plot(gene_hclust, labels = FALSE)
+
+#cut tree into 8 clusters
+clusters.genes.k8<-cutree(gene_hclust, k=8)
+head(clusters.genes.k8)
+table(clusters.genes.k8)
+
+#save rownames of cluster 3 to CSV file
+z.scaled.genes.cluster3<-z.scaled.genes[clusters.genes.k8==3, ]
+dim(z.scaled.genes)
+dim(z.scaled.genes.cluster3)
+write.csv(rownames(z.scaled.genes.cluster3), file="cluster3_genenames.csv")
+
+#plot heatmap
+Heatmap(matrix=z.scaled.genes.cluster3, cluster_rows=FALSE, cluster_columns = FALSE, show_row_names = FALSE)
+
+Heatmap(matrix=z.scaled.genes.cluster3, 
+        cluster_rows=TRUE, 
+        cluster_columns = TRUE, 
+        show_row_names = FALSE)
+
+#export to png
+
+png(filename="Cluster3_z.score_heatmap.png", height=30, width=10, units="cm", res=200)
+ht<-Heatmap(matrix=z.scaled.genes.cluster3, 
+            cluster_rows=TRUE, 
+            cluster_columns = TRUE, 
+            show_row_names = FALSE,
+            height=unit(20, "cm"))
+
+draw(ht)
+dev.off()
